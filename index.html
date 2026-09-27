@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -8,41 +7,21 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      background: #101215;
-      color: #f5f0e6;
-      font-family: Arial, sans-serif;
-      display: grid;
-      place-items: center;
-    }
-    main {
-      width: min(500px, 85%);
-      text-align: center;
-    }
-    h1 { color: #d5b36b; }
+    [hidden] { display: none !important; }
+    body { margin: 0; min-height: 100vh; background: #101215; color: #f5f0e6;
+      font-family: Arial, sans-serif; display: grid; place-items: center; }
+    main { width: min(500px, 88%); text-align: center; padding: 32px 0; }
+    h1 { color: #d5b36b; letter-spacing: 1px; }
     p { line-height: 1.5; }
-    input, button {
-      width: 100%;
-      padding: 18px;
-      margin: 10px 0;
-      border-radius: 10px;
-      font-size: 17px;
-    }
-    input {
-      background: #30343a;
-      border: 1px solid #d5b36b;
-      color: white;
-    }
-    button {
-      background: #d5b36b;
-      color: #101215;
-      border: 0;
-      font-weight: bold;
-      cursor: pointer;
-    }
-    #message { min-height: 25px; }
+    input, button { width: 100%; padding: 16px; margin: 9px 0;
+      border-radius: 10px; font-size: 16px; }
+    input { background: #30343a; border: 1px solid #d5b36b; color: white; }
+    button { background: #d5b36b; color: #101215; border: 0;
+      font-weight: bold; cursor: pointer; }
+    button:disabled { opacity: .55; cursor: wait; }
+    .link-button { background: transparent; color: #d5b36b;
+      text-decoration: underline; padding: 8px; }
+    #message { min-height: 26px; overflow-wrap: anywhere; }
   </style>
 </head>
 <body>
@@ -50,101 +29,183 @@
     <h1>POKER TOURNAMENT</h1>
     <p id="subtitle">Version 2 · Director Login</p>
 
-    <form id="loginForm">
-      <input id="email" type="email"
-             placeholder="Email" required>
-      <input id="password" type="password"
-             placeholder="Password" required>
-      <button type="submit" id="loginButton">
-        Sign In
-      </button>
+    <form id="loginForm" hidden>
+      <input id="email" type="email" placeholder="Email" autocomplete="email" required>
+      <input id="password" type="password" placeholder="Password"
+        autocomplete="current-password" required>
+      <button id="loginButton" type="submit">Sign In</button>
+      <button id="forgotButton" class="link-button" type="button">Forgot password?</button>
+    </form>
+
+    <form id="requestForm" hidden>
+      <p>Enter your director account email to request a password reset.</p>
+      <input id="resetEmail" type="email" placeholder="Email" autocomplete="email" required>
+      <button id="requestButton" type="submit">Send reset email</button>
+      <button class="link-button" type="button" id="backButton">Back to sign in</button>
+    </form>
+
+    <form id="resetForm" hidden>
+      <h2>Choose a new password</h2>
+      <input id="newPassword" type="password" placeholder="New password"
+        autocomplete="new-password" minlength="8" required>
+      <input id="confirmPassword" type="password" placeholder="Confirm new password"
+        autocomplete="new-password" minlength="8" required>
+      <button id="resetButton" type="submit">Save new password</button>
     </form>
 
     <section id="dashboard" hidden>
       <h2>Director Dashboard</h2>
       <p id="welcome"></p>
-      <button id="signOutButton">Sign Out</button>
+      <button id="signOutButton" type="button">Sign Out</button>
     </section>
 
-    <p id="message" role="status"></p>
+    <p id="message" role="status" aria-live="polite"></p>
   </main>
 
   <script>
-    const SUPABASE_URL = "https://pqackgnukvtpwqsppfzp.supabase.co/rest/v1/
-";
-    const SUPABASE_KEY = "sb_publishable_eYQEygrLY42umTyK_ANCNg_0gAppG8c
-";
+    // Public browser credentials for the separate V2 Supabase project.
+    const SUPABASE_URL = "https://pqackgnukvtpwqsppfzp.supabase.co";
+    const SUPABASE_KEY = "sb_publishable_eYQEygrLY42umTyK_ANCNg_0gAppG8c";
+    const loginForm = document.getElementById('loginForm');
+    const requestForm = document.getElementById('requestForm');
+    const resetForm = document.getElementById('resetForm');
+    const dashboard = document.getElementById('dashboard');
+    const message = document.getElementById('message');
+    const subtitle = document.getElementById('subtitle');
+    let db;
+    let recoveryMode = false;
 
-    const db = window.supabase.createClient(
-      SUPABASE_URL,
-      SUPABASE_KEY
-    );
-
-    const form = document.getElementById("loginForm");
-    const dashboard = document.getElementById("dashboard");
-    const message = document.getElementById("message");
-    const button = document.getElementById("loginButton");
-
-    async function showSession(session) {
-      if (!session) {
-        form.hidden = false;
-        dashboard.hidden = true;
-        return;
-      }
-
-      const { data, error } = await db
-        .from("director_profiles")
-        .select("display_name, role")
-        .eq("user_id", session.user.id)
-        .single();
-
-      if (error || !data) {
-        await db.auth.signOut();
-        message.textContent =
-          "This account does not have director access.";
-        return;
-      }
-
-      form.hidden = true;
-      dashboard.hidden = false;
-      message.textContent = "";
-      document.getElementById("welcome").textContent =
-        "Welcome, " + (data.display_name || "Director") +
-        " · " + data.role;
+    function show(section, text = '') {
+      [loginForm, requestForm, resetForm, dashboard].forEach(el => el.hidden = true);
+      if (section) section.hidden = false;
+      message.textContent = text;
     }
 
-    form.addEventListener("submit", async (event) => {
+    async function showSession(session) {
+      if (!session || recoveryMode) return;
+      const { data, error } = await db.from('director_profiles')
+        .select('display_name, role')
+        .eq('user_id', session.user.id).single();
+      if (error || !data) {
+        show(loginForm, 'This account does not have director access.');
+        return;
+      }
+      document.getElementById('welcome').textContent =
+        'Welcome, ' + (data.display_name || 'Director') + ' · ' + data.role;
+      subtitle.textContent = 'Version 2 · Director Dashboard';
+      show(dashboard);
+    }
+
+    async function start() {
+      if (!window.supabase) {
+        show(loginForm, 'Could not load the login service. Check your internet connection and refresh.');
+        return;
+      }
+      db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+      // Supabase emits PASSWORD_RECOVERY after it processes a valid email link.
+      db.auth.onAuthStateChange((event, session) => {
+        if (event === 'PASSWORD_RECOVERY') {
+          recoveryMode = true;
+          subtitle.textContent = 'Version 2 · Password Reset';
+          show(resetForm);
+        } else if (event === 'SIGNED_OUT') {
+          recoveryMode = false;
+          subtitle.textContent = 'Version 2 · Director Login';
+          show(loginForm);
+        }
+        // Avoid calling Supabase queries synchronously inside this callback.
+      });
+      const params = new URLSearchParams(window.location.hash.substring(1));
+      if (params.get('error')) {
+        show(loginForm, params.get('error_description') || 'This link has expired. Request a new reset email.');
+        return;
+      }
+      const { data, error } = await db.auth.getSession();
+      if (error) { show(loginForm, error.message); return; }
+      if (recoveryMode) return;
+      // Some email clients open a recovery URL before the recovery event fires.
+      if (params.get('type') === 'recovery' && data.session) {
+        recoveryMode = true;
+        subtitle.textContent = 'Version 2 · Password Reset';
+        show(resetForm);
+      } else if (data.session) {
+        await showSession(data.session);
+      } else {
+        show(loginForm);
+      }
+    }
+
+    loginForm.addEventListener('submit', async event => {
       event.preventDefault();
+      const button = document.getElementById('loginButton');
       button.disabled = true;
-      message.textContent = "Signing in...";
-
+      message.textContent = 'Signing in...';
       try {
-        const { data, error } =
-          await db.auth.signInWithPassword({
-            email: document.getElementById("email").value,
-            password: document.getElementById("password").value
-          });
-
+        if (!db) throw new Error('Login service has not loaded. Refresh the page.');
+        const { data, error } = await db.auth.signInWithPassword({
+          email: document.getElementById('email').value.trim(),
+          password: document.getElementById('password').value
+        });
         if (error) throw error;
         await showSession(data.session);
       } catch (error) {
-        message.textContent = error.message;
-      } finally {
-        button.disabled = false;
+        message.textContent = error.message || 'Unable to sign in.';
+      } finally { button.disabled = false; }
+    });
+
+    document.getElementById('forgotButton').addEventListener('click', () => {
+      document.getElementById('resetEmail').value = document.getElementById('email').value;
+      subtitle.textContent = 'Version 2 · Password Recovery';
+      show(requestForm);
+    });
+    document.getElementById('backButton').addEventListener('click', () => {
+      subtitle.textContent = 'Version 2 · Director Login';
+      show(loginForm);
+    });
+    requestForm.addEventListener('submit', async event => {
+      event.preventDefault();
+      const button = document.getElementById('requestButton');
+      button.disabled = true;
+      message.textContent = 'Requesting reset email...';
+      try {
+        const { error } = await db.auth.resetPasswordForEmail(
+          document.getElementById('resetEmail').value.trim(),
+          { redirectTo: window.location.origin + window.location.pathname }
+        );
+        if (error) throw error;
+        message.textContent = 'If this account exists, check your email for a reset link.';
+      } catch (error) {
+        message.textContent = error.message || 'Unable to send reset email.';
+      } finally { button.disabled = false; }
+    });
+    resetForm.addEventListener('submit', async event => {
+      event.preventDefault();
+      const password = document.getElementById('newPassword').value;
+      if (password !== document.getElementById('confirmPassword').value) {
+        message.textContent = 'Passwords do not match.';
+        return;
       }
-    });
-
-    document.getElementById("signOutButton")
-      .addEventListener("click", async () => {
+      const button = document.getElementById('resetButton');
+      button.disabled = true;
+      message.textContent = 'Saving your new password...';
+      try {
+        const { error } = await db.auth.updateUser({ password });
+        if (error) throw error;
+        recoveryMode = false;
         await db.auth.signOut();
-        dashboard.hidden = true;
-        form.hidden = false;
-        message.textContent = "Signed out.";
-      });
-
-    db.auth.getSession().then(({ data }) => {
-      if (data.session) showSession(data.session);
+        history.replaceState(null, '', window.location.pathname);
+        subtitle.textContent = 'Version 2 · Director Login';
+        document.getElementById('password').value = '';
+        show(loginForm, 'Password updated. Sign in with your new password.');
+      } catch (error) {
+        message.textContent = error.message || 'Could not update password.';
+      } finally { button.disabled = false; }
     });
+    document.getElementById('signOutButton').addEventListener('click', async () => {
+      await db.auth.signOut();
+      show(loginForm, 'Signed out.');
+    });
+    start().catch(error => show(loginForm, error.message || 'Could not start the app.'));
   </script>
 </body>
 </html>
