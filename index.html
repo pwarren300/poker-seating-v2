@@ -3,66 +3,148 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport"
-        content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Poker Tournament V2</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
+    * { box-sizing: border-box; }
     body {
+      margin: 0;
+      min-height: 100vh;
       background: #101215;
       color: #f5f0e6;
       font-family: Arial, sans-serif;
-      margin: 0;
-      min-height: 100vh;
       display: grid;
       place-items: center;
     }
     main {
-      width: min(340px, 85%);
+      width: min(500px, 85%);
       text-align: center;
     }
     h1 { color: #d5b36b; }
+    p { line-height: 1.5; }
     input, button {
-      box-sizing: border-box;
       width: 100%;
-      padding: 14px;
-      margin: 8px 0;
-      border-radius: 8px;
-      font-size: 16px;
+      padding: 18px;
+      margin: 10px 0;
+      border-radius: 10px;
+      font-size: 17px;
     }
     input {
       background: #30343a;
-      color: white;
       border: 1px solid #d5b36b;
+      color: white;
     }
     button {
       background: #d5b36b;
       color: #101215;
-      border: none;
+      border: 0;
       font-weight: bold;
+      cursor: pointer;
     }
+    #message { min-height: 25px; }
   </style>
 </head>
 <body>
   <main>
     <h1>POKER TOURNAMENT</h1>
-    <p>Version 2 · Director Login</p>
-    <form id="login">
-      <input type="email" placeholder="Email"
-             autocomplete="email" required>
-      <input type="password" placeholder="Password"
-             autocomplete="current-password" required>
-      <button type="submit">Sign In</button>
+    <p id="subtitle">Version 2 · Director Login</p>
+
+    <form id="loginForm">
+      <input id="email" type="email"
+             placeholder="Email" required>
+      <input id="password" type="password"
+             placeholder="Password" required>
+      <button type="submit" id="loginButton">
+        Sign In
+      </button>
     </form>
-    <p id="message"></p>
+
+    <section id="dashboard" hidden>
+      <h2>Director Dashboard</h2>
+      <p id="welcome"></p>
+      <button id="signOutButton">Sign Out</button>
+    </section>
+
+    <p id="message" role="status"></p>
   </main>
+
   <script>
-    document.getElementById('login')
-      .addEventListener('submit', function (event) {
-        event.preventDefault();
-        document.getElementById('message')
-          .textContent =
-            'Login connection coming next.';
+    const SUPABASE_URL = "https://pqackgnukvtpwqsppfzp.supabase.co/rest/v1/
+";
+    const SUPABASE_KEY = "sb_publishable_eYQEygrLY42umTyK_ANCNg_0gAppG8c
+";
+
+    const db = window.supabase.createClient(
+      SUPABASE_URL,
+      SUPABASE_KEY
+    );
+
+    const form = document.getElementById("loginForm");
+    const dashboard = document.getElementById("dashboard");
+    const message = document.getElementById("message");
+    const button = document.getElementById("loginButton");
+
+    async function showSession(session) {
+      if (!session) {
+        form.hidden = false;
+        dashboard.hidden = true;
+        return;
+      }
+
+      const { data, error } = await db
+        .from("director_profiles")
+        .select("display_name, role")
+        .eq("user_id", session.user.id)
+        .single();
+
+      if (error || !data) {
+        await db.auth.signOut();
+        message.textContent =
+          "This account does not have director access.";
+        return;
+      }
+
+      form.hidden = true;
+      dashboard.hidden = false;
+      message.textContent = "";
+      document.getElementById("welcome").textContent =
+        "Welcome, " + (data.display_name || "Director") +
+        " · " + data.role;
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      button.disabled = true;
+      message.textContent = "Signing in...";
+
+      try {
+        const { data, error } =
+          await db.auth.signInWithPassword({
+            email: document.getElementById("email").value,
+            password: document.getElementById("password").value
+          });
+
+        if (error) throw error;
+        await showSession(data.session);
+      } catch (error) {
+        message.textContent = error.message;
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    document.getElementById("signOutButton")
+      .addEventListener("click", async () => {
+        await db.auth.signOut();
+        dashboard.hidden = true;
+        form.hidden = false;
+        message.textContent = "Signed out.";
       });
+
+    db.auth.getSession().then(({ data }) => {
+      if (data.session) showSession(data.session);
+    });
   </script>
 </body>
 </html>
