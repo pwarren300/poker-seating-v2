@@ -829,7 +829,7 @@ async function saveNamedBlindStructure(){
  if(existing&&!confirm('Replace saved structure "'+existing.name+'"? Existing tournaments will not change.'))return;
  const {data,error}=existing
   ?await sb.from('poker_blind_structures').update({name,levels,updated_at:new Date().toISOString()}).eq('id',existing.id).select().single()
-  :await sb.from('poker_blind_structures').insert({name,levels}).select().single();
+  :await sb.from('poker_blind_structures').insert({owner_id:currentDirectorId,name,levels}).select().single();
  if(error)return toast('Could not save named structure: '+error.message);
  await fetchSavedBlindStructures();document.getElementById('savedBlindSelect').value=data.id;
  document.getElementById('blindStatus').textContent='Saved "'+name+'" to the cloud. This does not restart the current timer.';
