@@ -32,6 +32,17 @@
     input[type=date], input[type=time] { color-scheme: dark; }
     .small-button { padding: 10px; font-size: 14px; }
     .notice { color: #e4c781; }
+    .owner-actions { display:grid; gap:12px; }
+    .owner-actions button { margin:0; }
+    .application { border-top:1px solid #514a3b; padding:16px 0; overflow-wrap:anywhere; }
+    .application strong { color:#f0d392; }
+    .application .buttons { display:flex; gap:10px; }
+    .application .buttons button { flex:1; }
+    .danger { background:#4b3030; color:#fff; border:1px solid #a46a6a; }
+    .back { margin-bottom:16px; }
+    .badge { color:#f0d392; font-size:14px; }
+    .pending { color:#e4c781; }
+    .success { color:#a4d8a9; }
   </style>
 </head>
 <body>
@@ -45,6 +56,7 @@
         autocomplete="current-password" required>
       <button id="loginButton" type="submit">Sign In</button>
       <button id="forgotButton" class="link-button" type="button">Forgot password?</button>
+      <a href="director-signup.html" style="display:block;color:#d5b36b;padding:12px">New director? Request an account</a>
     </form>
 
     <form id="requestForm" hidden>
@@ -63,7 +75,40 @@
       <button id="resetButton" type="submit">Save new password</button>
     </form>
 
+    <section id="ownerDashboard" hidden>
+      <h2 style="color:#d5b36b">Platform Owner</h2>
+      <p id="ownerWelcome"></p>
+      <div class="panel owner-actions">
+        <h3>My Director Dashboard</h3>
+        <p class="muted">Run your own tournaments and view your history.</p>
+        <button id="openOwnDashboard" type="button">♠ Open My Tournaments →</button>
+      </div>
+      <div class="panel owner-actions">
+        <h3>Director Support Mode</h3>
+        <p class="muted">Select a director to support. Support access will be enabled in the next update.</p>
+        <button id="openSupport" type="button" class="secondary">Select Director →</button>
+      </div>
+      <div class="panel">
+        <h3>Director Applications <span id="pendingCount" class="badge"></span></h3>
+        <p class="muted">Only your owner account can approve or decline applications.</p>
+        <div id="applicationList" aria-live="polite">Loading applications...</div>
+        <button id="refreshApplications" class="secondary small-button" type="button">Refresh applications</button>
+      </div>
+      <button id="ownerSignOut" type="button" class="secondary">Sign Out</button>
+    </section>
+
+    <section id="supportPage" hidden>
+      <button id="backFromSupport" class="secondary back" type="button">← Owner dashboard</button>
+      <h2>Director Support Mode</h2>
+      <div class="panel">
+        <h3>Registered directors</h3>
+        <p class="muted">Director selection is shown here. Secure read-only access and support logging will be added before support mode can open another director's tournaments.</p>
+        <div id="directorList">Loading...</div>
+      </div>
+    </section>
+
     <section id="dashboard" hidden>
+      <button id="backToOwner" class="secondary back" type="button" hidden>← Owner dashboard</button>
       <h2>Director Dashboard</h2>
       <p id="welcome"></p>
       <div class="panel">
@@ -101,6 +146,10 @@
     const requestForm = document.getElementById('requestForm');
     const resetForm = document.getElementById('resetForm');
     const dashboard = document.getElementById('dashboard');
+    const ownerDashboard = document.getElementById('ownerDashboard');
+    const supportPage = document.getElementById('supportPage');
+    let currentRole = null;
+    let currentDisplayName = '';
     const message = document.getElementById('message');
     const subtitle = document.getElementById('subtitle');
     let db;
@@ -251,10 +300,104 @@
     });
 
     function show(section, text = '') {
-      [loginForm, requestForm, resetForm, dashboard].forEach(el => el.hidden = true);
+      [loginForm, requestForm, resetForm, dashboard, ownerDashboard, supportPage].forEach(el => el.hidden = true);
       if (section) section.hidden = false;
       message.textContent = text;
     }
+
+    function showOwner() {
+      document.getElementById('ownerWelcome').textContent = 'Welcome, ' + currentDisplayName;
+      subtitle.textContent = 'Version 2 · Platform Owner';
+      show(ownerDashboard);
+      loadApplications();
+    }
+
+    async function loadApplications() {
+      if (currentRole !== 'platform_owner') return;
+      const list = document.getElementById('applicationList');
+      list.textContent = 'Loading applications...';
+      const {data, error} = await db.from('director_applications')
+        .select('user_id, display_name, club_name, email, status, created_at')
+        .order('created_at', {ascending:false});
+      if (error) { list.textContent = 'Could not load applications: ' + error.message; return; }
+      list.replaceChildren();
+      const applications = data || [];
+      const pending = applications.filter(a => a.status === 'pending');
+      document.getElementById('pendingCount').textContent = '(' + pending.length + ' pending)';
+      if (!applications.length) { list.textContent = 'No applications yet.'; return; }
+      applications.forEach(a => {
+        const row = document.createElement('div');
+        row.className = 'application';
+        const name = document.createElement('strong');
+        name.textContent = a.display_name || 'Director';
+        const info = document.createElement('p');
+        info.className = 'muted';
+        info.textContent = [a.club_name, a.email, 'Status: ' + a.status].filter(Boolean).join(' · ');
+        row.append(name, info);
+        if (a.status === 'pending') {
+          const actions = document.createElement('div');
+          actions.className = 'buttons';
+          for (const decision of ['approved', 'declined']) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = decision === 'declined' ? 'danger small-button' : 'small-button';
+            button.textContent = decision === 'approved' ? 'Approve' : 'Decline';
+            button.addEventListener('click', async () => {
+              if (!confirm((decision === 'approved' ? 'Approve ' : 'Decline ') + (a.display_name || a.email) + '?')) return;
+              [...actions.querySelectorAll('button')].forEach(b => b.disabled = true);
+              message.textContent = 'Saving decision...';
+              const {error} = await db.rpc('review_director_application', {
+                applicant_id: a.user_id, decision
+              });
+              if (error) {
+                message.textContent = 'Could not review application: ' + error.message;
+                [...actions.querySelectorAll('button')].forEach(b => b.disabled = false);
+                return;
+              }
+              message.textContent = 'Application ' + decision + '.';
+              await loadApplications();
+            });
+            actions.appendChild(button);
+          }
+          row.appendChild(actions);
+        }
+        list.appendChild(row);
+      });
+    }
+
+    async function loadDirectorList() {
+      const list = document.getElementById('directorList');
+      list.textContent = 'Loading directors...';
+      const {data, error} = await db.from('director_applications')
+        .select('display_name, club_name, status').eq('status','approved')
+        .order('display_name');
+      if (error) { list.textContent = 'Could not load directors: ' + error.message; return; }
+      list.replaceChildren();
+      if (!data?.length) { list.textContent = 'No approved directors yet.'; return; }
+      data.forEach(d => {
+        const p = document.createElement('p');
+        p.className = 'tournament';
+        p.textContent = d.display_name + (d.club_name ? ' · ' + d.club_name : '');
+        list.appendChild(p);
+      });
+    }
+
+    document.getElementById('openOwnDashboard').addEventListener('click', async () => {
+      subtitle.textContent = 'Version 2 · My Director Dashboard';
+      show(dashboard);
+      await loadTournaments();
+    });
+    document.getElementById('backToOwner').addEventListener('click', showOwner);
+    document.getElementById('openSupport').addEventListener('click', () => {
+      show(supportPage);
+      loadDirectorList();
+    });
+    document.getElementById('backFromSupport').addEventListener('click', showOwner);
+    document.getElementById('refreshApplications').addEventListener('click', loadApplications);
+    document.getElementById('ownerSignOut').addEventListener('click', async () => {
+      await db.auth.signOut();
+      show(loginForm, 'Signed out.');
+    });
 
     async function showSession(session) {
       if (!session || recoveryMode) return;
@@ -262,15 +405,27 @@
         .select('display_name, role')
         .eq('user_id', session.user.id).single();
       if (error || !data) {
-        show(loginForm, 'This account does not have director access.');
+        const {data: application} = await db.from('director_applications')
+          .select('status').eq('user_id', session.user.id).maybeSingle();
+        show(loginForm, application?.status === 'pending'
+          ? 'Your email is confirmed. Your director account is awaiting approval.'
+          : application?.status === 'declined'
+          ? 'Your director application was declined. Contact the platform owner.'
+          : 'This account does not have director access.');
         return;
       }
       currentUserId = session.user.id;
-      await loadTournaments();
+      currentRole = data.role;
+      currentDisplayName = data.display_name || 'Director';
       document.getElementById('welcome').textContent =
-        'Welcome, ' + (data.display_name || 'Director') + ' · ' + data.role;
-      subtitle.textContent = 'Version 2 · Director Dashboard';
-      show(dashboard);
+        'Welcome, ' + currentDisplayName + ' · ' + data.role;
+      document.getElementById('backToOwner').hidden = currentRole !== 'platform_owner';
+      if (currentRole === 'platform_owner') showOwner();
+      else {
+        subtitle.textContent = 'Version 2 · Director Dashboard';
+        show(dashboard);
+        await loadTournaments();
+      }
     }
 
     async function start() {
@@ -289,6 +444,8 @@
           recoveryMode = false;
           subtitle.textContent = 'Version 2 · Director Login';
           currentUserId = null;
+          currentRole = null;
+          currentDisplayName = '';
           cloudTournaments = [];
           show(loginForm);
         }
