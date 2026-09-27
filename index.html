@@ -10,7 +10,7 @@
     [hidden] { display: none !important; }
     body { margin: 0; min-height: 100vh; background: #101215; color: #f5f0e6;
       font-family: Arial, sans-serif; display: grid; place-items: center; }
-    main { width: min(500px, 88%); text-align: center; padding: 32px 0; }
+    main { width: min(650px, 90%); text-align: center; padding: 32px 0; }
     h1 { color: #d5b36b; letter-spacing: 1px; }
     p { line-height: 1.5; }
     input, button { width: 100%; padding: 16px; margin: 9px 0;
@@ -22,6 +22,16 @@
     .link-button { background: transparent; color: #d5b36b;
       text-decoration: underline; padding: 8px; }
     #message { min-height: 26px; overflow-wrap: anywhere; }
+    .panel { border: 1px solid #665534; background: #1b1e22; padding: 18px; border-radius: 12px; margin: 20px 0; text-align: left; }
+    .panel h3 { color: #d5b36b; margin-top: 0; }
+    .muted { color: #c1bdaf; font-size: 14px; }
+    .tournament { border-top: 1px solid #514a3b; padding: 12px 0; }
+    .tournament strong { color: #f5f0e6; }
+    .secondary { background: #30343a; color: #f5f0e6; border: 1px solid #d5b36b; }
+    label { display: block; margin-top: 10px; }
+    input[type=date], input[type=time] { color-scheme: dark; }
+    .small-button { padding: 10px; font-size: 14px; }
+    .notice { color: #e4c781; }
   </style>
 </head>
 <body>
@@ -56,7 +66,24 @@
     <section id="dashboard" hidden>
       <h2>Director Dashboard</h2>
       <p id="welcome"></p>
-      <button id="signOutButton" type="button">Sign Out</button>
+      <div class="panel">
+        <h3>Your tournaments</h3>
+        <p class="muted">This first dashboard update lets you plan tournaments on this device. These drafts are not yet synced to Supabase or other directors.</p>
+        <div id="tournamentList" aria-live="polite"></div>
+        <button id="newTournamentButton" type="button">+ Create tournament draft</button>
+      </div>
+      <form id="tournamentForm" class="panel" hidden>
+        <h3>New tournament draft</h3>
+        <label for="tournamentName">Tournament name</label>
+        <input id="tournamentName" maxlength="80" placeholder="Wednesday Poker" required>
+        <label for="tournamentDate">Date</label>
+        <input id="tournamentDate" type="date" required>
+        <label for="tournamentTime">Start time</label>
+        <input id="tournamentTime" type="time" required>
+        <button type="submit">Save draft</button>
+        <button id="cancelTournamentButton" type="button" class="secondary">Cancel</button>
+      </form>
+      <button id="signOutButton" type="button" class="secondary">Sign Out</button>
     </section>
 
     <p id="message" role="status" aria-live="polite"></p>
@@ -74,6 +101,73 @@
     const subtitle = document.getElementById('subtitle');
     let db;
     let recoveryMode = false;
+    let currentUserId = null;
+    const draftKey = userId => 'poker-v2-tournament-drafts:' + userId;
+    function readDrafts() {
+      if (!currentUserId) return [];
+      try {
+        const drafts = JSON.parse(localStorage.getItem(draftKey(currentUserId)) || '[]');
+        return Array.isArray(drafts) ? drafts : [];
+      } catch (_) { return []; }
+    }
+    function renderDrafts() {
+      const list = document.getElementById('tournamentList');
+      list.replaceChildren();
+      const drafts = readDrafts().sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+      if (!drafts.length) {
+        const p = document.createElement('p');
+        p.className = 'muted';
+        p.textContent = 'No tournament drafts yet.';
+        list.appendChild(p);
+      }
+      drafts.forEach(draft => {
+        const row = document.createElement('div');
+        row.className = 'tournament';
+        const name = document.createElement('strong');
+        name.textContent = draft.name;
+        const details = document.createElement('p');
+        details.className = 'muted';
+        details.textContent = draft.date + ' · ' + draft.time + ' · Saved on this device';
+        const remove = document.createElement('button');
+        remove.className = 'secondary small-button';
+        remove.type = 'button';
+        remove.textContent = 'Delete draft';
+        remove.addEventListener('click', () => {
+          if (!confirm('Delete this tournament draft?')) return;
+          localStorage.setItem(draftKey(currentUserId), JSON.stringify(readDrafts().filter(item => item.id !== draft.id)));
+          renderDrafts();
+        });
+        row.append(name, details, remove);
+        list.appendChild(row);
+      });
+    }
+    document.getElementById('newTournamentButton').addEventListener('click', () => {
+      document.getElementById('tournamentForm').hidden = false;
+      document.getElementById('tournamentName').focus();
+    });
+    document.getElementById('cancelTournamentButton').addEventListener('click', () => {
+      document.getElementById('tournamentForm').hidden = true;
+    });
+    document.getElementById('tournamentForm').addEventListener('submit', event => {
+      event.preventDefault();
+      if (!currentUserId) return;
+      const draft = {
+        id: crypto.randomUUID(),
+        name: document.getElementById('tournamentName').value.trim(),
+        date: document.getElementById('tournamentDate').value,
+        time: document.getElementById('tournamentTime').value
+      };
+      if (!draft.name) return;
+      try {
+        localStorage.setItem(draftKey(currentUserId), JSON.stringify([...readDrafts(), draft]));
+        event.currentTarget.reset();
+        event.currentTarget.hidden = true;
+        renderDrafts();
+        message.textContent = 'Draft saved on this device. Cloud syncing is coming next.';
+      } catch (_) {
+        message.textContent = 'Could not save the draft. Check your browser storage settings.';
+      }
+    });
 
     function show(section, text = '') {
       [loginForm, requestForm, resetForm, dashboard].forEach(el => el.hidden = true);
@@ -90,6 +184,8 @@
         show(loginForm, 'This account does not have director access.');
         return;
       }
+      currentUserId = session.user.id;
+      renderDrafts();
       document.getElementById('welcome').textContent =
         'Welcome, ' + (data.display_name || 'Director') + ' · ' + data.role;
       subtitle.textContent = 'Version 2 · Director Dashboard';
@@ -111,6 +207,7 @@
         } else if (event === 'SIGNED_OUT') {
           recoveryMode = false;
           subtitle.textContent = 'Version 2 · Director Login';
+          currentUserId = null;
           show(loginForm);
         }
         // Avoid calling Supabase queries synchronously inside this callback.
