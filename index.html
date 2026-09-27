@@ -68,8 +68,12 @@
       <p id="welcome"></p>
       <div class="panel">
         <h3>Your tournaments</h3>
-        <p class="muted">This first dashboard update lets you plan tournaments on this device. These drafts are not yet synced to Supabase or other directors.</p>
+        <p class="muted">Your tournaments are saved securely to Supabase and available when you sign in on another device.</p>
         <div id="tournamentList" aria-live="polite"></div>
+        <div id="localDraftPanel" hidden>
+          <p id="localDraftCount" class="notice"></p>
+          <button id="importDraftsButton" type="button" class="secondary">Upload existing phone drafts</button>
+        </div>
         <button id="newTournamentButton" type="button">+ Create tournament draft</button>
       </div>
       <form id="tournamentForm" class="panel" hidden>
@@ -102,6 +106,7 @@
     let db;
     let recoveryMode = false;
     let currentUserId = null;
+    let cloudTournaments = [];
     const draftKey = userId => 'poker-v2-tournament-drafts:' + userId;
     function readDrafts() {
       if (!currentUserId) return [];
@@ -110,37 +115,101 @@
         return Array.isArray(drafts) ? drafts : [];
       } catch (_) { return []; }
     }
-    function renderDrafts() {
+    function showLocalDraftOption() {
+      const local = readDrafts();
+      const panel = document.getElementById('localDraftPanel');
+      panel.hidden = !local.length;
+      document.getElementById('localDraftCount').textContent =
+        local.length + ' draft(s) saved on this device are not yet in the cloud.';
+    }
+    function renderTournaments() {
       const list = document.getElementById('tournamentList');
       list.replaceChildren();
-      const drafts = readDrafts().sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
-      if (!drafts.length) {
+      const tournaments = [...cloudTournaments].sort((a, b) =>
+        (a.tournament_date + a.start_time).localeCompare(b.tournament_date + b.start_time));
+      if (!tournaments.length) {
         const p = document.createElement('p');
         p.className = 'muted';
-        p.textContent = 'No tournament drafts yet.';
+        p.textContent = 'No cloud tournaments yet.';
         list.appendChild(p);
       }
-      drafts.forEach(draft => {
+      tournaments.forEach(tournament => {
         const row = document.createElement('div');
         row.className = 'tournament';
         const name = document.createElement('strong');
-        name.textContent = draft.name;
+        name.textContent = tournament.name;
         const details = document.createElement('p');
         details.className = 'muted';
-        details.textContent = draft.date + ' · ' + draft.time + ' · Saved on this device';
+        details.textContent = tournament.tournament_date + ' · ' +
+          tournament.start_time.slice(0, 5) + ' · ' + tournament.status + ' · Saved to cloud';
         const remove = document.createElement('button');
         remove.className = 'secondary small-button';
         remove.type = 'button';
-        remove.textContent = 'Delete draft';
-        remove.addEventListener('click', () => {
-          if (!confirm('Delete this tournament draft?')) return;
-          localStorage.setItem(draftKey(currentUserId), JSON.stringify(readDrafts().filter(item => item.id !== draft.id)));
-          renderDrafts();
+        remove.textContent = 'Delete tournament';
+        remove.addEventListener('click', async () => {
+          if (!confirm('Permanently delete this cloud tournament?')) return;
+          remove.disabled = true;
+          const { error } = await db.from('tournaments').delete()
+            .eq('id', tournament.id).eq('owner_id', currentUserId);
+          if (error) {
+            message.textContent = 'Could not delete tournament: ' + error.message;
+            remove.disabled = false;
+            return;
+          }
+          await loadTournaments();
+          message.textContent = 'Tournament deleted from cloud.';
         });
         row.append(name, details, remove);
         list.appendChild(row);
       });
+      showLocalDraftOption();
     }
+    async function loadTournaments() {
+      const userId = currentUserId;
+      const list = document.getElementById('tournamentList');
+      list.textContent = 'Loading cloud tournaments...';
+      const { data, error } = await db.from('tournaments')
+        .select('id, owner_id, name, tournament_date, start_time, status')
+        .eq('owner_id', userId).order('tournament_date');
+      if (userId !== currentUserId) return;
+      if (error) {
+        list.textContent = 'Could not load cloud tournaments. ' + error.message;
+        showLocalDraftOption();
+        return;
+      }
+      cloudTournaments = data || [];
+      renderTournaments();
+    }
+    document.getElementById('importDraftsButton').addEventListener('click', async () => {
+      const userId = currentUserId;
+      const drafts = readDrafts();
+      if (!drafts.length || !confirm('Upload your saved device drafts to Supabase?')) return;
+      const button = document.getElementById('importDraftsButton');
+      button.disabled = true;
+      let uploaded = 0;
+      try {
+        // Import individually: keep any unsuccessful draft on the phone for retry.
+        for (const draft of drafts) {
+          if (currentUserId !== userId) break;
+          const { error } = await db.from('tournaments').insert({
+            id: draft.id, owner_id: userId, name: draft.name,
+            tournament_date: draft.date, start_time: draft.time, status: 'draft'
+          });
+          if (error) {
+            // If a previous import succeeded but local cleanup failed, accept that row.
+            if (error.code !== '23505') throw error;
+          }
+          localStorage.setItem(draftKey(userId), JSON.stringify(
+            readDrafts().filter(item => item.id !== draft.id)));
+          uploaded++;
+        }
+        await loadTournaments();
+        message.textContent = uploaded + ' device draft(s) uploaded to Supabase.';
+      } catch (error) {
+        await loadTournaments();
+        message.textContent = uploaded + ' uploaded. Remaining drafts kept on phone. ' + error.message;
+      } finally { button.disabled = false; }
+    });
     document.getElementById('newTournamentButton').addEventListener('click', () => {
       document.getElementById('tournamentForm').hidden = false;
       document.getElementById('tournamentName').focus();
@@ -148,25 +217,32 @@
     document.getElementById('cancelTournamentButton').addEventListener('click', () => {
       document.getElementById('tournamentForm').hidden = true;
     });
-    document.getElementById('tournamentForm').addEventListener('submit', event => {
+    document.getElementById('tournamentForm').addEventListener('submit', async event => {
       event.preventDefault();
       if (!currentUserId) return;
+      const form = event.currentTarget;
+      const save = form.querySelector('button[type="submit"]');
       const draft = {
-        id: crypto.randomUUID(),
+        owner_id: currentUserId,
         name: document.getElementById('tournamentName').value.trim(),
-        date: document.getElementById('tournamentDate').value,
-        time: document.getElementById('tournamentTime').value
+        tournament_date: document.getElementById('tournamentDate').value,
+        start_time: document.getElementById('tournamentTime').value,
+        status: 'draft'
       };
       if (!draft.name) return;
+      save.disabled = true;
+      message.textContent = 'Saving tournament to Supabase...';
       try {
-        localStorage.setItem(draftKey(currentUserId), JSON.stringify([...readDrafts(), draft]));
-        event.currentTarget.reset();
-        event.currentTarget.hidden = true;
-        renderDrafts();
-        message.textContent = 'Draft saved on this device. Cloud syncing is coming next.';
-      } catch (_) {
-        message.textContent = 'Could not save the draft. Check your browser storage settings.';
-      }
+        const { error } = await db.from('tournaments').insert(draft);
+        if (error) throw error;
+        form.reset();
+        form.hidden = true;
+        await loadTournaments();
+        message.textContent = 'Tournament saved to Supabase.';
+      } catch (error) {
+        message.textContent = 'Could not save tournament: ' + error.message +
+          '. Your form is still filled in; please retry.';
+      } finally { save.disabled = false; }
     });
 
     function show(section, text = '') {
@@ -185,7 +261,7 @@
         return;
       }
       currentUserId = session.user.id;
-      renderDrafts();
+      await loadTournaments();
       document.getElementById('welcome').textContent =
         'Welcome, ' + (data.display_name || 'Director') + ' · ' + data.role;
       subtitle.textContent = 'Version 2 · Director Dashboard';
@@ -208,6 +284,7 @@
           recoveryMode = false;
           subtitle.textContent = 'Version 2 · Director Login';
           currentUserId = null;
+          cloudTournaments = [];
           show(loginForm);
         }
         // Avoid calling Supabase queries synchronously inside this callback.
