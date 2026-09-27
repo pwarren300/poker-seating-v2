@@ -1,0 +1,68 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1">
+  <title>Poker Tournament V2</title>
+  <style>
+    body {
+      background: #101215;
+      color: #f5f0e6;
+      font-family: Arial, sans-serif;
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+    }
+    main {
+      width: min(340px, 85%);
+      text-align: center;
+    }
+    h1 { color: #d5b36b; }
+    input, button {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 14px;
+      margin: 8px 0;
+      border-radius: 8px;
+      font-size: 16px;
+    }
+    input {
+      background: #30343a;
+      color: white;
+      border: 1px solid #d5b36b;
+    }
+    button {
+      background: #d5b36b;
+      color: #101215;
+      border: none;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>POKER TOURNAMENT</h1>
+    <p>Version 2 · Director Login</p>
+    <form id="login">
+      <input type="email" placeholder="Email"
+             autocomplete="email" required>
+      <input type="password" placeholder="Password"
+             autocomplete="current-password" required>
+      <button type="submit">Sign In</button>
+    </form>
+    <p id="message"></p>
+  </main>
+  <script>
+    document.getElementById('login')
+      .addEventListener('submit', function (event) {
+        event.preventDefault();
+        document.getElementById('message')
+          .textContent =
+            'Login connection coming next.';
+      });
+  </script>
+</body>
+</html>
