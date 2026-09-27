@@ -142,6 +142,11 @@
         details.className = 'muted';
         details.textContent = tournament.tournament_date + ' · ' +
           tournament.start_time.slice(0, 5) + ' · ' + tournament.status + ' · Saved to cloud';
+        const open = document.createElement('button');
+        open.className = 'small-button';
+        open.type = 'button';
+        open.textContent = 'Open tournament';
+        open.addEventListener('click', () => { location.href = 'tournament.html?id=' + encodeURIComponent(tournament.id); });
         const remove = document.createElement('button');
         remove.className = 'secondary small-button';
         remove.type = 'button';
@@ -159,7 +164,7 @@
           await loadTournaments();
           message.textContent = 'Tournament deleted from cloud.';
         });
-        row.append(name, details, remove);
+        row.append(name, details, open, remove);
         list.appendChild(row);
       });
       showLocalDraftOption();
