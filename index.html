@@ -198,11 +198,11 @@
         open.type = 'button';
         open.textContent = 'Open tournament';
         open.addEventListener('click', () => {
+          let url = 'tournament.html?id=' + encodeURIComponent(tournament.id);
           if (supportDirectorId) {
-            message.textContent = 'Read-only Support Mode: tournament opening comes in the next security step.';
-            return;
+            url += '&support=' + encodeURIComponent(supportDirectorId);
           }
-          location.href = 'tournament.html?id=' + encodeURIComponent(tournament.id);
+          location.href = url;
         });
         const remove = document.createElement('button');
         remove.className = 'secondary small-button';
