@@ -85,7 +85,7 @@
       </div>
       <div class="panel owner-actions">
         <h3>Director Support Mode</h3>
-        <p class="muted">Select a director to support. Support access will be enabled in the next update.</p>
+        <p class="muted">Select an approved director to view their tournaments in read-only Support Mode.</p>
         <button id="openSupport" type="button" class="secondary">Select Director →</button>
       </div>
       <div class="panel">
@@ -102,7 +102,7 @@
       <h2>Director Support Mode</h2>
       <div class="panel">
         <h3>Registered directors</h3>
-        <p class="muted">Director selection is shown here. Secure read-only access and support logging will be added before support mode can open another director's tournaments.</p>
+        <p class="muted">Choose an approved director. You will remain signed in as Platform Owner.</p>
         <div id="directorList">Loading...</div>
       </div>
     </section>
@@ -150,6 +150,8 @@
     const supportPage = document.getElementById('supportPage');
     let currentRole = null;
     let currentDisplayName = '';
+    let supportDirectorId = null;
+    let supportDirectorName = '';
     const message = document.getElementById('message');
     const subtitle = document.getElementById('subtitle');
     let db;
@@ -195,7 +197,13 @@
         open.className = 'small-button';
         open.type = 'button';
         open.textContent = 'Open tournament';
-        open.addEventListener('click', () => { location.href = 'tournament.html?id=' + encodeURIComponent(tournament.id); });
+        open.addEventListener('click', () => {
+          if (supportDirectorId) {
+            message.textContent = 'Read-only Support Mode: tournament opening comes in the next security step.';
+            return;
+          }
+          location.href = 'tournament.html?id=' + encodeURIComponent(tournament.id);
+        });
         const remove = document.createElement('button');
         remove.className = 'secondary small-button';
         remove.type = 'button';
@@ -213,19 +221,20 @@
           await loadTournaments();
           message.textContent = 'Tournament deleted from cloud.';
         });
-        row.append(name, details, open, remove);
+        row.append(name, details, open);
+        if (!supportDirectorId) row.append(remove);
         list.appendChild(row);
       });
       showLocalDraftOption();
     }
     async function loadTournaments() {
-      const userId = currentUserId;
+      const userId = supportDirectorId || currentUserId;
       const list = document.getElementById('tournamentList');
       list.textContent = 'Loading cloud tournaments...';
       const { data, error } = await db.from('tournaments')
         .select('id, owner_id, name, tournament_date, start_time, status')
         .eq('owner_id', userId).order('tournament_date');
-      if (userId !== currentUserId) return;
+      if (supportDirectorId ? userId !== supportDirectorId : userId !== currentUserId) return;
       if (error) {
         list.textContent = 'Could not load cloud tournaments. ' + error.message;
         showLocalDraftOption();
@@ -368,26 +377,55 @@
     async function loadDirectorList() {
       const list = document.getElementById('directorList');
       list.textContent = 'Loading directors...';
-      const {data, error} = await db.from('director_applications')
-        .select('display_name, club_name, status').eq('status','approved')
+      const {data, error} = await db.from('director_profiles')
+        .select('user_id, display_name, role')
+        .eq('role','director')
         .order('display_name');
       if (error) { list.textContent = 'Could not load directors: ' + error.message; return; }
       list.replaceChildren();
       if (!data?.length) { list.textContent = 'No approved directors yet.'; return; }
       data.forEach(d => {
-        const p = document.createElement('p');
-        p.className = 'tournament';
-        p.textContent = d.display_name + (d.club_name ? ' · ' + d.club_name : '');
-        list.appendChild(p);
+        const row = document.createElement('div');
+        row.className = 'tournament';
+        const name = document.createElement('strong');
+        name.textContent = d.display_name || 'Director';
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'small-button secondary';
+        button.textContent = 'View tournaments →';
+        button.addEventListener('click', async () => {
+          supportDirectorId = d.user_id;
+          supportDirectorName = d.display_name || 'Director';
+          subtitle.textContent = 'Version 2 · Support Mode';
+          document.getElementById('welcome').textContent =
+            'Support Mode — ' + supportDirectorName + ' · Read only';
+          document.getElementById('backToOwner').hidden = false;
+          document.getElementById('newTournamentButton').hidden = true;
+          document.getElementById('localDraftPanel').hidden = true;
+          show(dashboard);
+          await loadTournaments();
+        });
+        row.append(name, button);
+        list.appendChild(row);
       });
     }
 
     document.getElementById('openOwnDashboard').addEventListener('click', async () => {
+      supportDirectorId = null;
+      supportDirectorName = '';
+      document.getElementById('newTournamentButton').hidden = false;
+      document.getElementById('welcome').textContent =
+        'Welcome, ' + currentDisplayName + ' · ' + currentRole;
       subtitle.textContent = 'Version 2 · My Director Dashboard';
       show(dashboard);
       await loadTournaments();
     });
-    document.getElementById('backToOwner').addEventListener('click', showOwner);
+    document.getElementById('backToOwner').addEventListener('click', () => {
+      supportDirectorId = null;
+      supportDirectorName = '';
+      document.getElementById('newTournamentButton').hidden = false;
+      showOwner();
+    });
     document.getElementById('openSupport').addEventListener('click', () => {
       show(supportPage);
       loadDirectorList();
