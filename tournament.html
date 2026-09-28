@@ -121,13 +121,27 @@ body.tv-mode{background:#101112}
 #financePage .players,#historyPage .players{margin-top:0}
 #historyPage #historyList{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}
 @media(max-width:760px){.page-nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.page-nav button{padding:13px 5px;font-size:14px}.finance-player-row{align-items:flex-start;flex-direction:column}}
+body.support-readonly #tournamentPage .toolbar,
+body.support-readonly #financePage input,
+body.support-readonly #financePage button,
+body.support-readonly #payoutPage .controls,
+body.support-readonly #blindPage .toolbar,
+body.support-readonly #blindPage input,
+body.support-readonly #blindPage select,
+body.support-readonly #blindPage .blind-editor,
+body.support-readonly #historyPage button,
+body.support-readonly #newTournamentBtn,
+body.support-readonly #backHistoryBtn{display:none!important}
+body.support-readonly .tap-name,
+body.support-readonly .seat{cursor:default}
 </style>
 </head>
 <body>
 <div id="auth" class="auth"><div class="auth-card"><h2>♠ Poker Table Seating</h2><p class="small">Sign in to keep the tournament shared between your phone and laptop.</p><input id="email" type="email" placeholder="Email address" autocomplete="email"><input id="password" type="password" placeholder="Password" autocomplete="current-password"><button id="loginBtn" onclick="login()">Sign in</button><p id="authMsg" class="small"></p></div></div>
 <div class="wrap" id="app" style="display:none">
   <div class="topline"><div><h1>♠ Poker Table Seating</h1><p class="sub">Tournament management</p></div><div><span id="syncStatus" class="sync">Cloud connected</span><br><button class="secondary" style="margin-top:6px;padding:7px 10px;font-size:12px" onclick="logout()">Sign out</button></div></div>
-  <p style="margin:0 0 8px"><a href="index.html" style="color:#f1d18a">← Director dashboard</a></p><nav class="page-nav" aria-label="App pages"><button id="tournamentNavBtn" class="active" onclick="showPage('tournament')" aria-current="page">♠ Tournament</button><button id="financeNavBtn" onclick="showPage('finance')">💷 Entry fees</button><button id="payoutNavBtn" onclick="showPage('payouts')">💷 Payout calculator</button><button id="blindNavBtn" onclick="showPage('blinds')">⏱ Blind timer</button><button id="displayNavBtn" onclick="showPage('display')">📺 Live Display</button><button id="historyNavBtn" onclick="showPage('history')">🏆 History</button></nav>
+  <div id="supportBanner" class="status hidden" style="border-color:#d5b36b;color:#f1d18a;font-weight:800">Platform Owner Support Mode · Read only</div>
+<p style="margin:0 0 8px"><a id="dashboardBackLink" href="index.html" style="color:#f1d18a">← Director dashboard</a></p><nav class="page-nav" aria-label="App pages"><button id="tournamentNavBtn" class="active" onclick="showPage('tournament')" aria-current="page">♠ Tournament</button><button id="financeNavBtn" onclick="showPage('finance')">💷 Entry fees</button><button id="payoutNavBtn" onclick="showPage('payouts')">💷 Payout calculator</button><button id="blindNavBtn" onclick="showPage('blinds')">⏱ Blind timer</button><button id="displayNavBtn" onclick="showPage('display')">📺 Live Display</button><button id="historyNavBtn" onclick="showPage('history')">🏆 History</button></nav>
   <section id="tournamentPage" aria-label="Tournament management">
   <div class="toolbar">
     <label style="display:flex;align-items:center;gap:8px;color:#cbd5e1;font-size:13px">Tournament date <input id="tournamentDate" type="date" style="min-width:150px;flex:0 0 auto"></label>
@@ -235,7 +249,10 @@ const MAX_SEATS=8;
 let state=loadLocal();
 let tournamentId=null;
 let currentDirectorId=null;
-const selectedTournamentId=new URLSearchParams(location.search).get('id');
+const urlParams=new URLSearchParams(location.search);
+const selectedTournamentId=urlParams.get('id');
+const supportDirectorId=urlParams.get('support');
+let supportMode=false;
 let lastCloudUpdatedAt=null;
 let pollTimer=null;
 let realtimeChannel=null;
@@ -554,8 +571,8 @@ async function newTournament(){
  if(!confirm('Create another tournament? You can also create a dated draft from your dashboard.'))return;
  const chosen=await chooseNewTournamentBlinds();if(!chosen)return;
  payoutDraft=null;if(realtimeChannel){await sb.removeChannel(realtimeChannel);realtimeChannel=null}clearInterval(pollTimer);const d=new Date().toISOString().slice(0,10);state=blankState();state.blindTimer={levels:structuredClone(chosen.levels),structureName:chosen.name,index:0,remainingMs:chosen.levels[0].minutes*60000,runningSince:null};state.tournamentDate=d;state.tournamentName='';state.players={};state.finishOrder=[];state.status='active';state.finalResults=[];tournamentId=null;lastCloudUpdatedAt=null;window.viewingHistory=false;document.getElementById('newTournamentBtn').classList.add('hidden');document.getElementById('backHistoryBtn').classList.add('hidden');if(!await createActiveTournament()){toast('New tournament was not saved; please try again.');return}render();setupRealtime();pollTimer=setInterval(pollCloud,3000)}
-async function createActiveTournament(){const {data,error}=await sb.from('tournaments').insert({owner_id:currentDirectorId,name:state.tournamentName||'Poker Tournament',tournament_date:state.tournamentDate,start_time:'20:00',status:'active',tournament_data:state}).select().single();if(error){toast('Could not create tournament: '+error.message);return false}tournamentId=data.id;lastCloudUpdatedAt=data.updated_at;cache();return true}
-async function saveCloud(){if(!tournamentId)return;const now=new Date().toISOString();const {data,error}=await sb.from('tournaments').update({tournament_date:state.tournamentDate,name:state.tournamentName||'Poker Tournament',status:'active',tournament_data:state,updated_at:now}).eq('id',tournamentId).select().single();if(error){console.error(error);document.getElementById('syncStatus').textContent='Cloud save error';return}lastCloudUpdatedAt=data.updated_at;document.getElementById('syncStatus').textContent='Cloud saved'}
+async function createActiveTournament(){if(supportMode){toast('Support Mode is read only.');return false;}const {data,error}=await sb.from('tournaments').insert({owner_id:currentDirectorId,name:state.tournamentName||'Poker Tournament',tournament_date:state.tournamentDate,start_time:'20:00',status:'active',tournament_data:state}).select().single();if(error){toast('Could not create tournament: '+error.message);return false}tournamentId=data.id;lastCloudUpdatedAt=data.updated_at;cache();return true}
+async function saveCloud(){if(supportMode)return;if(!tournamentId)return;const now=new Date().toISOString();const {data,error}=await sb.from('tournaments').update({tournament_date:state.tournamentDate,name:state.tournamentName||'Poker Tournament',status:'active',tournament_data:state,updated_at:now}).eq('id',tournamentId).select().single();if(error){console.error(error);document.getElementById('syncStatus').textContent='Cloud save error';return}lastCloudUpdatedAt=data.updated_at;document.getElementById('syncStatus').textContent='Cloud saved'}
 async function saveAndRender(msg){cache();render();if(msg)toast(msg);await saveCloud()}
 async function loadHistory(){const {data,error}=await sb.from('tournaments').select('id,tournament_date,status,tournament_data,created_at,ended_at').eq('owner_id',currentDirectorId).eq('status','completed').order('tournament_date',{ascending:false}).order('created_at',{ascending:false});if(error){console.error(error);return}window.historyRows=data||[];renderHistory()}
 function renderHistory(){const el=document.getElementById('historyList');el.innerHTML='';const rows=window.historyRows||[];if(!rows.length){el.innerHTML='<span class="empty">No completed tournaments yet.</span>';return}const all=document.createElement('button');all.className='danger';all.textContent='🗑️ Delete all history';all.style.marginBottom='10px';all.onclick=deleteAllHistory;el.appendChild(all);rows.forEach(r=>{const d=document.createElement('div');d.className='history-row';const count=(r.tournament_data&&r.tournament_data.finalResults||[]).length;const title=(r.tournament_data&&r.tournament_data.tournamentName)||'Poker Tournament';d.innerHTML='<div class="history-title">'+escapeHtml(title)+'</div><div class="history-meta">'+r.tournament_date+' · '+(r.tournament_data?.status==='abandoned'?'Abandoned':count+' players')+'</div><div class="small" style="margin-top:5px">Tap Open to view the full results</div>';const actions=document.createElement('div');actions.className='history-actions';const open=document.createElement('button');open.className='secondary';open.textContent='Open results';open.onclick=()=>openHistoryTournament(r);const edit=document.createElement('button');edit.className='secondary';edit.textContent='✏️ Edit name';edit.onclick=()=>editHistoryName(r);const del=document.createElement('button');del.className='danger';del.textContent='🗑️ Delete';del.onclick=()=>deleteHistoryTournament(r);actions.append(open,edit,del);d.appendChild(actions);el.appendChild(d)})}
@@ -981,12 +998,31 @@ async function logout(){await sb.auth.signOut()}
 async function start(){const {data:{session}}=await sb.auth.getSession();if(session)await signedIn(session);sb.auth.onAuthStateChange((event,session)=>{if(session)setTimeout(()=>signedIn(session),0);else{document.getElementById('app').style.display='none';document.getElementById('auth').classList.remove('hidden')}})}
 async function signedIn(session){
  currentDirectorId=session.user.id;
- const {data:profile,error:profileError}=await sb.from('director_profiles').select('user_id').eq('user_id',currentDirectorId).single();
+ const {data:profile,error:profileError}=await sb.from('director_profiles').select('user_id,role').eq('user_id',currentDirectorId).single();
  if(profileError||!profile){document.getElementById('authMsg').textContent='Director access required.';return;}
+
+ supportMode=!!supportDirectorId;
+ if(supportMode&&profile.role!=='platform_owner'){
+   document.getElementById('authMsg').textContent='Platform Owner access required for Support Mode.';
+   document.getElementById('app').style.display='none';
+   document.getElementById('auth').classList.remove('hidden');
+   return;
+ }
+ const targetDirectorId=supportMode?supportDirectorId:currentDirectorId;
  window.viewingHistory=false;payoutDraft=null;
  document.getElementById('auth').classList.add('hidden');document.getElementById('app').style.display='block';
- document.getElementById('syncStatus').textContent='Loading cloud…';
- let query=sb.from('tournaments').select('id,name,tournament_date,start_time,status,tournament_data,updated_at').eq('owner_id',currentDirectorId);
+ if(supportMode){
+   document.body.classList.add('support-readonly');
+   document.getElementById('supportBanner').classList.remove('hidden');
+   document.getElementById('dashboardBackLink').textContent='← Exit Support Mode';
+ }else{
+   document.body.classList.remove('support-readonly');
+   document.getElementById('supportBanner').classList.add('hidden');
+   document.getElementById('dashboardBackLink').textContent='← Director dashboard';
+ }
+ document.getElementById('syncStatus').textContent=supportMode?'Support view · Read only':'Loading cloud…';
+
+ let query=sb.from('tournaments').select('id,owner_id,name,tournament_date,start_time,status,tournament_data,updated_at').eq('owner_id',targetDirectorId);
  if(selectedTournamentId)query=query.eq('id',selectedTournamentId);
  else query=query.eq('status','active').order('updated_at',{ascending:false}).limit(1);
  const {data,error}=await query;
@@ -997,14 +1033,23 @@ async function signedIn(session){
   tournamentId=row.id;state=row.tournament_data&&Array.isArray(row.tournament_data.tables)?row.tournament_data:blankState();
   state.tournamentDate=row.tournament_date||state.tournamentDate;state.tournamentName=row.name||state.tournamentName;
   state.status=row.status==='draft'?'active':row.status;
-  lastCloudUpdatedAt=row.updated_at;cache();
-  if(normalizeTables()&&row.status==='active')await saveCloud();
- }else{tournamentId=null;lastCloudUpdatedAt=null;state=blankState();state.status='completed';state.finalResults=[];cache();}
- await loadHistory();await fetchSavedBlindStructures();render();
- document.getElementById('syncStatus').textContent='Cloud connected';
- if(tournamentId&&state.status==='active'){setupRealtime();clearInterval(pollTimer);pollTimer=setInterval(pollCloud,3000)}
+  lastCloudUpdatedAt=row.updated_at;
+  if(!supportMode)cache();
+  if(normalizeTables()&&row.status==='active'&&!supportMode)await saveCloud();
+ }else{tournamentId=null;lastCloudUpdatedAt=null;state=blankState();state.status='completed';state.finalResults=[];if(!supportMode)cache();}
+ if(supportMode){
+   window.historyRows=[];
+   renderHistory();
+ }else{
+   await loadHistory();
+   await fetchSavedBlindStructures();
+ }
+ render();
+ document.getElementById('syncStatus').textContent=supportMode?'Support view · Read only':'Cloud connected';
+ if(tournamentId&&state.status==='active'){
+   setupRealtime();clearInterval(pollTimer);pollTimer=setInterval(pollCloud,3000);
+ }
 }
-
 function setupRealtime(){if(!tournamentId)return;if(realtimeChannel)sb.removeChannel(realtimeChannel);realtimeChannel=sb.channel('poker-'+tournamentId).on('postgres_changes',{event:'UPDATE',schema:'public',table:'tournaments',filter:'id=eq.'+tournamentId},payload=>{const row=payload.new;if(row.updated_at===lastCloudUpdatedAt)return;state=row.tournament_data||state;normalizeTables();state.tournamentDate=row.tournament_date||state.tournamentDate;state.tournamentName=state.tournamentName||'';lastCloudUpdatedAt=row.updated_at;render()}).subscribe()}
 async function pollCloud(){if(!tournamentId)return;const {data,error}=await sb.from('tournaments').select('tournament_data,tournament_date,updated_at,status').eq('id',tournamentId).single();if(error||!data||data.status!=='active')return;if(lastCloudUpdatedAt&&new Date(data.updated_at)<=new Date(lastCloudUpdatedAt))return;state=data.tournament_data||state;normalizeTables();state.tournamentDate=data.tournament_date||state.tournamentDate;state.tournamentName=state.tournamentName||'';lastCloudUpdatedAt=data.updated_at;render();document.getElementById('syncStatus').textContent='Updated from cloud'}
 start();
