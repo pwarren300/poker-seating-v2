@@ -617,7 +617,7 @@ function applySupportReadOnlyUI(){
  document.querySelectorAll('input,select,textarea').forEach(el=>el.disabled=true);
  document.querySelectorAll('#app button').forEach(btn=>{
    const id=btn.id||'';
-   const keep=['signOutBtn','tournamentNavBtn','financeNavBtn','payoutNavBtn','blindNavBtn','displayNavBtn','historyNavBtn','displayFullscreenBtn'].includes(id);
+   const keep=['signOutBtn','supportEditBtn','tournamentNavBtn','financeNavBtn','payoutNavBtn','blindNavBtn','displayNavBtn','historyNavBtn','displayFullscreenBtn'].includes(id);
    if(!keep)btn.disabled=true;
  });
  document.querySelectorAll('.tap-name,.seat').forEach(el=>{
