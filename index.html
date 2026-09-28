@@ -94,6 +94,12 @@
         <div id="applicationList" aria-live="polite">Loading applications...</div>
         <button id="refreshApplications" class="secondary small-button" type="button">Refresh applications</button>
       </div>
+      <div class="panel">
+        <h3>Support Activity</h3>
+        <p class="muted">Recent Platform Owner support access and editing activity.</p>
+        <div id="supportActivityList" aria-live="polite">Loading support activity...</div>
+        <button id="refreshSupportActivity" class="secondary small-button" type="button">Refresh activity</button>
+      </div>
       <button id="ownerSignOut" type="button" class="secondary">Sign Out</button>
     </section>
 
@@ -198,11 +204,11 @@
         open.type = 'button';
         open.textContent = 'Open tournament';
         open.addEventListener('click', () => {
-          let url = 'tournament.html?id=' + encodeURIComponent(tournament.id);
           if (supportDirectorId) {
-            url += '&support=' + encodeURIComponent(supportDirectorId);
+            message.textContent = 'Read-only Support Mode: tournament opening comes in the next security step.';
+            return;
           }
-          location.href = url;
+          location.href = 'tournament.html?id=' + encodeURIComponent(tournament.id);
         });
         const remove = document.createElement('button');
         remove.className = 'secondary small-button';
@@ -319,6 +325,72 @@
       subtitle.textContent = 'Version 2 · Platform Owner';
       show(ownerDashboard);
       loadApplications();
+      loadSupportActivity();
+    }
+
+    async function loadSupportActivity() {
+      if (currentRole !== 'platform_owner') return;
+      const list = document.getElementById('supportActivityList');
+      list.textContent = 'Loading support activity...';
+
+      const [{data: logs, error: logError}, {data: profiles}, {data: tournaments}] = await Promise.all([
+        db.from('support_activity_log')
+          .select('id, director_id, tournament_id, action, details, created_at')
+          .order('created_at', {ascending:false})
+          .limit(20),
+        db.from('director_profiles').select('user_id, display_name'),
+        db.from('tournaments').select('id, name')
+      ]);
+
+      if (logError) {
+        list.textContent = 'Could not load support activity: ' + logError.message;
+        return;
+      }
+
+      const directorNames = new Map((profiles || []).map(p => [p.user_id, p.display_name || 'Director']));
+      const tournamentNames = new Map((tournaments || []).map(t => [t.id, t.name || 'Tournament']));
+      list.replaceChildren();
+
+      if (!(logs || []).length) {
+        list.textContent = 'No support activity recorded yet.';
+        return;
+      }
+
+      const actionLabels = {
+        support_opened: 'Support opened',
+        editing_enabled: 'Editing enabled',
+        editing_disabled: 'Editing disabled',
+        tournament_saved: 'Tournament changed'
+      };
+
+      (logs || []).forEach(log => {
+        const row = document.createElement('div');
+        row.className = 'application';
+
+        const title = document.createElement('strong');
+        const director = directorNames.get(log.director_id) || 'Director';
+        const tournament = log.tournament_id ? (tournamentNames.get(log.tournament_id) || 'Tournament') : '';
+        title.textContent = director + (tournament ? ' · ' + tournament : '');
+
+        const info = document.createElement('p');
+        info.className = 'muted';
+        const when = new Intl.DateTimeFormat('en-GB', {
+          day:'2-digit', month:'2-digit', year:'numeric',
+          hour:'2-digit', minute:'2-digit'
+        }).format(new Date(log.created_at));
+        info.textContent = when + ' · ' + (actionLabels[log.action] || log.action);
+
+        row.append(title, info);
+
+        if (log.details) {
+          const details = document.createElement('p');
+          details.className = 'muted';
+          details.textContent = log.details;
+          row.appendChild(details);
+        }
+
+        list.appendChild(row);
+      });
     }
 
     async function loadApplications() {
@@ -431,6 +503,7 @@
       loadDirectorList();
     });
     document.getElementById('backFromSupport').addEventListener('click', showOwner);
+    document.getElementById('refreshSupportActivity').addEventListener('click', loadSupportActivity);
     document.getElementById('refreshApplications').addEventListener('click', loadApplications);
     document.getElementById('ownerSignOut').addEventListener('click', async () => {
       await db.auth.signOut();
