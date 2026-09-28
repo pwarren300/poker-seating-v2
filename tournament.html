@@ -574,7 +574,7 @@ async function newTournament(){
  const chosen=await chooseNewTournamentBlinds();if(!chosen)return;
  payoutDraft=null;if(realtimeChannel){await sb.removeChannel(realtimeChannel);realtimeChannel=null}clearInterval(pollTimer);const d=new Date().toISOString().slice(0,10);state=blankState();state.blindTimer={levels:structuredClone(chosen.levels),structureName:chosen.name,index:0,remainingMs:chosen.levels[0].minutes*60000,runningSince:null};state.tournamentDate=d;state.tournamentName='';state.players={};state.finishOrder=[];state.status='active';state.finalResults=[];tournamentId=null;lastCloudUpdatedAt=null;window.viewingHistory=false;document.getElementById('newTournamentBtn').classList.add('hidden');document.getElementById('backHistoryBtn').classList.add('hidden');if(!await createActiveTournament()){toast('New tournament was not saved; please try again.');return}render();setupRealtime();pollTimer=setInterval(pollCloud,3000)}
 async function createActiveTournament(){if(supportMode){toast('Create new tournaments from the director account.');return false;}const {data,error}=await sb.from('tournaments').insert({owner_id:currentDirectorId,name:state.tournamentName||'Poker Tournament',tournament_date:state.tournamentDate,start_time:'20:00',status:'active',tournament_data:state}).select().single();if(error){toast('Could not create tournament: '+error.message);return false}tournamentId=data.id;lastCloudUpdatedAt=data.updated_at;cache();return true}
-async function saveCloud(){if(supportMode&&!supportEditing)return;if(!tournamentId)return;const now=new Date().toISOString();const {data,error}=await sb.from('tournaments').update({tournament_date:state.tournamentDate,name:state.tournamentName||'Poker Tournament',status:'active',tournament_data:state,updated_at:now}).eq('id',tournamentId).select().single();if(error){console.error(error);document.getElementById('syncStatus').textContent='Cloud save error';return}lastCloudUpdatedAt=data.updated_at;document.getElementById('syncStatus').textContent='Cloud saved'}
+async function saveCloud(){if(supportMode&&!supportEditing)return;if(!tournamentId)return;const now=new Date().toISOString();const {data,error}=await sb.from('tournaments').update({tournament_date:state.tournamentDate,name:state.tournamentName||'Poker Tournament',status:'active',tournament_data:state,updated_at:now}).eq('id',tournamentId).select().single();if(error){console.error(error);document.getElementById('syncStatus').textContent='Cloud save error';return}lastCloudUpdatedAt=data.updated_at;document.getElementById('syncStatus').textContent='Cloud saved';if(supportMode&&supportEditing)await logSupportActivity('tournament_updated','Tournament data changed while Support Mode editing was enabled.')}
 async function saveAndRender(msg){cache();render();if(msg)toast(msg);await saveCloud()}
 async function loadHistory(){const {data,error}=await sb.from('tournaments').select('id,tournament_date,status,tournament_data,created_at,ended_at').eq('owner_id',currentDirectorId).eq('status','completed').order('tournament_date',{ascending:false}).order('created_at',{ascending:false});if(error){console.error(error);return}window.historyRows=data||[];renderHistory()}
 function renderHistory(){const el=document.getElementById('historyList');el.innerHTML='';const rows=window.historyRows||[];if(!rows.length){el.innerHTML='<span class="empty">No completed tournaments yet.</span>';return}const all=document.createElement('button');all.className='danger';all.textContent='🗑️ Delete all history';all.style.marginBottom='10px';all.onclick=deleteAllHistory;el.appendChild(all);rows.forEach(r=>{const d=document.createElement('div');d.className='history-row';const count=(r.tournament_data&&r.tournament_data.finalResults||[]).length;const title=(r.tournament_data&&r.tournament_data.tournamentName)||'Poker Tournament';d.innerHTML='<div class="history-title">'+escapeHtml(title)+'</div><div class="history-meta">'+r.tournament_date+' · '+(r.tournament_data?.status==='abandoned'?'Abandoned':count+' players')+'</div><div class="small" style="margin-top:5px">Tap Open to view the full results</div>';const actions=document.createElement('div');actions.className='history-actions';const open=document.createElement('button');open.className='secondary';open.textContent='Open results';open.onclick=()=>openHistoryTournament(r);const edit=document.createElement('button');edit.className='secondary';edit.textContent='✏️ Edit name';edit.onclick=()=>editHistoryName(r);const del=document.createElement('button');del.className='danger';del.textContent='🗑️ Delete';del.onclick=()=>deleteHistoryTournament(r);actions.append(open,edit,del);d.appendChild(actions);el.appendChild(d)})}
@@ -1012,6 +1012,12 @@ document.getElementById('nameInput').addEventListener('keydown',e=>{if(e.key==='
 async function login(){const email=document.getElementById('email').value.trim(),password=document.getElementById('password').value;const msg=document.getElementById('authMsg');if(!email||!password){msg.textContent='Enter your email and password.';return}document.getElementById('loginBtn').disabled=true;msg.textContent='Signing in…';const {error}=await sb.auth.signInWithPassword({email,password});document.getElementById('loginBtn').disabled=false;if(error){msg.textContent=error.message;return}msg.textContent=''}
 async function logout(){await sb.auth.signOut()}
 async function start(){const {data:{session}}=await sb.auth.getSession();if(session)await signedIn(session);sb.auth.onAuthStateChange((event,session)=>{if(session)setTimeout(()=>signedIn(session),0);else{document.getElementById('app').style.display='none';document.getElementById('auth').classList.remove('hidden')}})}
+async function logSupportActivity(action,details=''){
+ if(!supportMode||!currentDirectorId||!supportDirectorId)return;
+ const row={owner_id:currentDirectorId,director_id:supportDirectorId,tournament_id:tournamentId||null,action,details:details||null};
+ const {error}=await sb.from('support_activity_log').insert(row);
+ if(error)console.error('Support activity log error:',error);
+}
 async function toggleSupportEditing(){
  if(!supportMode||!supportDirectorId)return;
  const next=!supportEditing;
@@ -1019,6 +1025,7 @@ async function toggleSupportEditing(){
  if(!confirm(label+' for this director in Support Mode?'))return;
  const {error}=await sb.from('director_support_sessions').upsert({owner_id:currentDirectorId,director_id:supportDirectorId,editing_enabled:next},{onConflict:'owner_id'});
  if(error)return toast('Could not change Support Mode: '+error.message);
+ await logSupportActivity(next?'editing_enabled':'editing_disabled',next?'Platform Owner enabled editing in Support Mode.':'Platform Owner returned Support Mode to read only.');
  location.reload();
 }
 async function signedIn(session){
@@ -1080,6 +1087,7 @@ async function signedIn(session){
  }
  render();
  document.getElementById('syncStatus').textContent=supportMode?(supportEditing?'Support view · Editing enabled':'Support view · Read only'):'Cloud connected';
+ if(supportMode){const k='support-log-opened:'+currentDirectorId+':'+supportDirectorId+':'+tournamentId;if(!sessionStorage.getItem(k)){await logSupportActivity('support_opened','Platform Owner opened this tournament in Support Mode.');sessionStorage.setItem(k,'1')}}
  if(tournamentId&&state.status==='active'){
    setupRealtime();clearInterval(pollTimer);pollTimer=setInterval(pollCloud,3000);
  }
